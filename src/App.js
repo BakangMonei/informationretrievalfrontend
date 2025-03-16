@@ -14,6 +14,8 @@ import {
   Settings,
   Loader
 } from 'lucide-react';
+import { Dialog, Transition } from '@headlessui/react';
+import { Fragment } from 'react';
 
 import "slick-carousel/slick/slick.css";
 import "slick-carousel/slick/slick-theme.css";
@@ -85,6 +87,15 @@ function App() {
     useStemming: false,
     rankingAlgorithm: 'tf-idf', // or 'tf'
     lengthNormalization: true
+  });
+
+  // Add new state for dialog
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [dialogConfig, setDialogConfig] = useState({
+    title: '',
+    message: '',
+    confirmText: '',
+    onConfirm: () => { },
   });
 
   const sliderSettings = {
@@ -221,25 +232,47 @@ function App() {
 
     setLoading(prev => ({ ...prev, search: true }));
     try {
+      // Send search request with all configuration parameters
       const response = await axios.post('/documents/search', {
-        query: searchQuery,
-        ...searchConfig
+        query: searchQuery.trim(),
+        tokenizerType: searchConfig.tokenizerType,
+        useStemming: searchConfig.useStemming,
+        rankingAlgorithm: searchConfig.rankingAlgorithm,
+        applyLengthNormalization: searchConfig.lengthNormalization,
+        resultsPerPage: 10,
+        page: 0
       });
-      setDocuments(response.data.results);
 
-      // Display search metrics
-      if (response.data.metrics) {
-        setIndexMetrics(response.data.metrics);
-      }
+      // Handle structured response with results and metrics
+      if (response.data) {
+        const { results, totalHits, queryTime, metrics } = response.data;
 
-      toast.success(`Found ${response.data.totalHits} results in ${response.data.queryTime}ms`);
-    } catch (error) {
-      if (error.response?.status === 404) {
-        setDocuments([]);
-        toast.info('No documents found matching your search');
+        setDocuments(results || []);
+
+        // Update metrics for visualization
+        if (metrics) {
+          setIndexMetrics({
+            ...metrics,
+            queryTime,
+            totalHits,
+            precision: metrics.precision,
+            recall: metrics.recall,
+            f1Score: metrics.f1Score,
+            tokenizationTime: metrics.tokenizationTime,
+            rankingTime: metrics.rankingTime,
+            numberOfTokens: metrics.numberOfTokens
+          });
+        }
+
+        toast.success(`Found ${totalHits} results in ${queryTime}ms`);
       } else {
-        toast.error('Error searching documents');
+        setDocuments([]);
+        toast.info('No results found');
       }
+    } catch (error) {
+      console.error('Search error:', error);
+      setDocuments([]);
+      toast.error('Error performing search');
     } finally {
       setLoading(prev => ({ ...prev, search: false }));
     }
@@ -310,20 +343,24 @@ function App() {
   };
 
   const handleRecreateIndex = async () => {
-    if (!window.confirm('Are you sure you want to recreate the index? This will delete all existing data.')) {
-      return;
-    }
-
-    setLoading(prev => ({ ...prev, recreate: true }));
-    try {
-      await axios.post('/index/recreate');
-      toast.success('Index recreated successfully');
-      await fetchInitialData();
-    } catch (error) {
-      toast.error('Error recreating index');
-    } finally {
-      setLoading(prev => ({ ...prev, recreate: false }));
-    }
+    setDialogConfig({
+      title: 'Confirm Index Recreation',
+      message: 'Are you sure you want to recreate the index? This will delete all existing data.',
+      confirmText: 'Recreate Index',
+      onConfirm: async () => {
+        setLoading(prev => ({ ...prev, recreate: true }));
+        try {
+          await axios.post('/index/recreate');
+          toast.success('Index recreated successfully');
+          await fetchInitialData();
+        } catch (error) {
+          toast.error('Error recreating index');
+        } finally {
+          setLoading(prev => ({ ...prev, recreate: false }));
+        }
+      }
+    });
+    setDialogOpen(true);
   };
 
   // Add this component for server status
@@ -428,6 +465,196 @@ function App() {
     </div>
   );
 
+  // Add this new component for displaying search results
+  const SearchResults = ({ documents }) => {
+    if (!documents.length) {
+      return null;
+    }
+
+    return (
+      <div className="bg-white rounded-lg shadow-sm p-6">
+        <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
+          <Search className="h-5 w-5 text-indigo-600" />
+          Search Results ({documents.length})
+        </h2>
+        <div className="space-y-6">
+          {documents.map((doc, index) => (
+            <div
+              key={index}
+              className="border-b border-gray-200 pb-4 last:border-0 last:pb-0"
+            >
+              <h3 className="font-medium text-lg text-gray-900 mb-2">
+                {doc.title || 'Untitled Document'}
+              </h3>
+              {doc.author && (
+                <p className="text-sm text-gray-600 mb-2">
+                  Author: {doc.author}
+                </p>
+              )}
+              {doc.content && (
+                <p className="text-gray-700 line-clamp-3">
+                  {doc.content}
+                </p>
+              )}
+              {doc.score && (
+                <p className="text-sm text-gray-500 mt-2">
+                  Relevance Score: {doc.score.toFixed(4)}
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  // Add this component after the SearchResults component
+  const MetricsVisualization = ({ metrics }) => {
+    if (!metrics) return null;
+
+    return (
+      <div className="bg-white rounded-lg shadow-sm p-6 mb-8">
+        <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
+          <BarChart className="h-5 w-5 text-indigo-600" />
+          Search Performance Metrics
+        </h2>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {/* Effectiveness Metrics */}
+          <div className="bg-gray-50 p-4 rounded-lg">
+            <h3 className="text-sm font-medium text-gray-500">Precision</h3>
+            <p className="text-2xl font-bold text-indigo-600">
+              {metrics.precision?.toFixed(3) || 'N/A'}
+            </p>
+          </div>
+
+          <div className="bg-gray-50 p-4 rounded-lg">
+            <h3 className="text-sm font-medium text-gray-500">Recall</h3>
+            <p className="text-2xl font-bold text-indigo-600">
+              {metrics.recall?.toFixed(3) || 'N/A'}
+            </p>
+          </div>
+
+          <div className="bg-gray-50 p-4 rounded-lg">
+            <h3 className="text-sm font-medium text-gray-500">F1 Score</h3>
+            <p className="text-2xl font-bold text-indigo-600">
+              {metrics.f1Score?.toFixed(3) || 'N/A'}
+            </p>
+          </div>
+
+          <div className="bg-gray-50 p-4 rounded-lg">
+            <h3 className="text-sm font-medium text-gray-500">Total Hits</h3>
+            <p className="text-2xl font-bold text-indigo-600">
+              {metrics.totalHits || 0}
+            </p>
+          </div>
+
+          {/* Performance Metrics */}
+          <div className="bg-gray-50 p-4 rounded-lg">
+            <h3 className="text-sm font-medium text-gray-500">Query Time</h3>
+            <p className="text-2xl font-bold text-indigo-600">
+              {metrics.queryTime}ms
+            </p>
+          </div>
+
+          <div className="bg-gray-50 p-4 rounded-lg">
+            <h3 className="text-sm font-medium text-gray-500">Tokenization Time</h3>
+            <p className="text-2xl font-bold text-indigo-600">
+              {metrics.tokenizationTime}ms
+            </p>
+          </div>
+
+          <div className="bg-gray-50 p-4 rounded-lg">
+            <h3 className="text-sm font-medium text-gray-500">Ranking Time</h3>
+            <p className="text-2xl font-bold text-indigo-600">
+              {metrics.rankingTime}ms
+            </p>
+          </div>
+
+          <div className="bg-gray-50 p-4 rounded-lg">
+            <h3 className="text-sm font-medium text-gray-500">Number of Tokens</h3>
+            <p className="text-2xl font-bold text-indigo-600">
+              {metrics.numberOfTokens || 0}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Add this new component for the dialog
+  const ConfirmDialog = () => (
+    <Transition appear show={dialogOpen} as={Fragment}>
+      <Dialog
+        as="div"
+        className="relative z-50"
+        onClose={() => setDialogOpen(false)}
+      >
+        <Transition.Child
+          as={Fragment}
+          enter="ease-out duration-300"
+          enterFrom="opacity-0"
+          enterTo="opacity-100"
+          leave="ease-in duration-200"
+          leaveFrom="opacity-100"
+          leaveTo="opacity-0"
+        >
+          <div className="fixed inset-0 bg-black bg-opacity-25" />
+        </Transition.Child>
+
+        <div className="fixed inset-0 overflow-y-auto">
+          <div className="flex min-h-full items-center justify-center p-4 text-center">
+            <Transition.Child
+              as={Fragment}
+              enter="ease-out duration-300"
+              enterFrom="opacity-0 scale-95"
+              enterTo="opacity-100 scale-100"
+              leave="ease-in duration-200"
+              leaveFrom="opacity-100 scale-100"
+              leaveTo="opacity-0 scale-95"
+            >
+              <Dialog.Panel className="w-full max-w-md transform overflow-hidden rounded-2xl bg-white p-6 text-left align-middle shadow-xl transition-all">
+                <Dialog.Title className="text-lg font-medium leading-6 text-gray-900">
+                  {dialogConfig.title}
+                </Dialog.Title>
+                <div className="mt-2">
+                  <p className="text-sm text-gray-500">{dialogConfig.message}</p>
+                </div>
+                <div className="mt-4 flex justify-end gap-3">
+                  <button
+                    type="button"
+                    className="inline-flex justify-center rounded-md border border-transparent bg-gray-100 px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-200"
+                    onClick={() => setDialogOpen(false)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="inline-flex justify-center rounded-md border border-transparent bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700"
+                    onClick={() => {
+                      dialogConfig.onConfirm();
+                      setDialogOpen(false);
+                    }}
+                  >
+                    {dialogConfig.confirmText}
+                  </button>
+                </div>
+              </Dialog.Panel>
+            </Transition.Child>
+          </div>
+        </div>
+      </Dialog>
+    </Transition>
+  );
+
+  // Add loading animations to the buttons
+  const LoadingSpinner = () => (
+    <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+    </svg>
+  );
+
   return (
     <div className="min-h-screen bg-gray-50">
       <Toaster position="top-right" />
@@ -452,17 +679,27 @@ function App() {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-10 rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-                placeholder="Search documents..."
+                className="w-full pl-10 pr-4 py-2 rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                placeholder="Enter your search query..."
+                disabled={loading.search}
               />
             </div>
             <button
               type="submit"
-              disabled={loading.search}
-              className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 flex items-center gap-2 disabled:opacity-50"
+              disabled={loading.search || !searchQuery.trim()}
+              className="px-6 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
             >
-              {loading.search ? <Loader className="animate-spin" /> : <Search />}
-              Search
+              {loading.search ? (
+                <>
+                  <LoadingSpinner />
+                  Searching...
+                </>
+              ) : (
+                <>
+                  <Search className="h-4 w-4" />
+                  Search
+                </>
+              )}
             </button>
           </form>
         </div>
@@ -482,10 +719,19 @@ function App() {
             <button
               onClick={handleBulkUpload}
               disabled={loading.upload}
-              className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 flex items-center gap-2 disabled:opacity-50"
+              className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 flex items-center gap-2 disabled:opacity-50 transition-all duration-200"
             >
-              {loading.upload ? <Loader className="animate-spin" /> : <FileUp />}
-              Upload
+              {loading.upload ? (
+                <>
+                  <LoadingSpinner />
+                  Uploading...
+                </>
+              ) : (
+                <>
+                  <FileUp />
+                  Upload
+                </>
+              )}
             </button>
           </div>
         </div>
@@ -577,50 +823,16 @@ function App() {
         <ConfigurationPanel />
 
         {/* Search Results */}
-        {documents.length > 0 && (
-          <div className="bg-white rounded-lg shadow-sm p-6">
-            <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
-              <Search className="h-5 w-5 text-indigo-600" />
-              Search Results
-            </h2>
-            <div className="mb-4">
-              <h3 className="font-medium text-gray-700">Search Metrics</h3>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-2">
-                <div className="bg-gray-50 p-3 rounded">
-                  <p className="text-sm text-gray-500">Precision</p>
-                  <p className="text-lg font-semibold">{indexMetrics?.precision?.toFixed(3) || 'N/A'}</p>
-                </div>
-                <div className="bg-gray-50 p-3 rounded">
-                  <p className="text-sm text-gray-500">Recall</p>
-                  <p className="text-lg font-semibold">{indexMetrics?.recall?.toFixed(3) || 'N/A'}</p>
-                </div>
-                <div className="bg-gray-50 p-3 rounded">
-                  <p className="text-sm text-gray-500">F1 Score</p>
-                  <p className="text-lg font-semibold">{indexMetrics?.f1Score?.toFixed(3) || 'N/A'}</p>
-                </div>
-                <div className="bg-gray-50 p-3 rounded">
-                  <p className="text-sm text-gray-500">Query Time</p>
-                  <p className="text-lg font-semibold">{indexMetrics?.queryTime}ms</p>
-                </div>
-              </div>
-            </div>
-            <div className="space-y-4">
-              {documents.map((doc, index) => (
-                <div key={index} className="border-b pb-4">
-                  <h3 className="font-medium">{doc.title}</h3>
-                  <p className="text-gray-600">{doc.content}</p>
-                  <div className="mt-2 text-sm text-gray-500">
-                    <span className="mr-4">Score: {doc.score?.toFixed(4)}</span>
-                    <span>Rank: {index + 1}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        <SearchResults documents={documents} />
+
+        {/* Metrics Visualization */}
+        {indexMetrics && <MetricsVisualization metrics={indexMetrics} />}
       </div>
+
+      {/* Add the dialog component */}
+      <ConfirmDialog />
     </div>
   );
 }
 
-export default App; 
+export default App;
