@@ -3,38 +3,70 @@
 ## Base URL
 `http://localhost:8080/api`
 
-## Document Endpoints
+## Document Management Endpoints
 
-### 1. Create Document
-- **Endpoint:** `POST /documents`
-- **Description:** Creates a new document in the system
+### 1. Documents (`/api/documents`)
+#### POST
+- **Description:** Creates a new document
 - **Request Body:**
 ```json
 {
     "title": "Sample Document",
-    "content": "This is the content of the document",
+    "content": "Document content here",
     "author": "John Doe",
     "collection": "general"
 }
 ```
 - **Response:** `201 Created`
+
+#### GET
+- **Description:** Retrieves all documents (with pagination)
+- **Query Parameters:** 
+  - `page` (default: 0)
+  - `size` (default: 10)
+- **Response:** `200 OK`
 ```json
 {
-    "id": "123e4567-e89b-12d3-a456-426614174000",
-    "title": "Sample Document",
-    "content": "This is the content of the document",
-    "author": "John Doe",
-    "collection": "general"
+    "content": [
+        {
+            "id": "123",
+            "title": "Sample Document",
+            "content": "Content...",
+            "author": "John Doe",
+            "collection": "general"
+        }
+    ],
+    "totalPages": 5,
+    "totalElements": 50,
+    "currentPage": 0
 }
 ```
 
-### 2. Search Documents
-- **Endpoint:** `POST /documents/search`
-- **Description:** Searches documents based on query and configuration
+### 2. Bulk Document Upload (`/api/documents/bulk`)
+#### POST
+- **Description:** Uploads multiple documents at once
+- **Request Body:** Array of documents
+```json
+[
+    {
+        "title": "Document 1",
+        "content": "Content 1"
+    },
+    {
+        "title": "Document 2",
+        "content": "Content 2"
+    }
+]
+```
+- **Response:** `201 Created`
+
+### 3. Document Search (`/api/documents/search`)
+#### POST
+- **Description:** Searches documents based on query and parameters
 - **Request Body:**
 ```json
 {
-    "query": "sample search query",
+    "query": "search terms",
     "collection": "general",
     "rankingAlgorithm": "tf-idf",
     "tokenizerType": "standard",
@@ -44,184 +76,216 @@
     "page": 0
 }
 ```
-- **Response:** `200 OK`
-```json
-{
-    "results": [
-        {
-            "id": "123e4567-e89b-12d3-a456-426614174000",
-            "title": "Sample Document",
-            "content": "...",
-            "score": 0.75
-        }
-    ],
-    "totalHits": 1,
-    "totalPages": 1,
-    "currentPage": 0
-}
-```
 
-## Configuration Endpoints
-
-### 1. Tokenizer Configuration
-- **GET:** `GET /index/config/tokenizer`
-- **Response:**
-```json
-{
-    "type": "standard"
-}
-```
-
-- **PUT:** `PUT /index/config/tokenizer`
-- **Request Body:**
-```json
-{
-    "type": "whitespace"  // Options: "standard", "whitespace", "simple"
-}
-```
+### 4. Single Document Operations (`/api/documents/{id}`)
+#### GET
+- **Description:** Retrieves a specific document
 - **Response:** `200 OK`
 
-### 2. Stemming Configuration
-- **GET:** `GET /index/config/stemming`
-- **Response:**
-```json
-{
-    "enabled": false
-}
-```
+#### PUT
+- **Description:** Updates a specific document
+- **Request Body:** Updated document details
 
-- **PUT:** `PUT /index/config/stemming`
-- **Request Body:**
-```json
-{
-    "enabled": true
-}
-```
-- **Response:** `200 OK`
+#### DELETE
+- **Description:** Deletes a specific document
+- **Response:** `204 No Content`
 
-### 3. Ranking Algorithm Configuration
-- **GET:** `GET /index/config/ranking`
-- **Response:**
-```json
-{
-    "algorithm": "tf-idf"
-}
-```
+## Index Configuration Endpoints
 
-- **PUT:** `PUT /index/config/ranking`
-- **Request Body:**
-```json
-{
-    "algorithm": "bm25"  // Options: "tf-idf", "bm25"
-}
-```
-- **Response:** `200 OK`
-
-### 4. Length Normalization Configuration
-- **GET:** `GET /index/config/normalization`
-- **Response:**
+### 1. Normalization Configuration (`/api/index/config/normalization`)
+#### GET
+- **Description:** Gets current normalization settings
+#### PUT
+- **Description:** Updates normalization settings
 ```json
 {
     "enabled": true
 }
 ```
 
-- **PUT:** `PUT /index/config/normalization`
-- **Request Body:**
+### 2. Ranking Configuration (`/api/index/config/ranking`)
+#### GET
+- **Description:** Gets current ranking algorithm
+#### PUT
+- **Description:** Sets ranking algorithm
 ```json
 {
-    "enabled": false
+    "algorithm": "tf-idf"  // or "bm25"
 }
 ```
-- **Response:** `200 OK`
 
-## Health Check
-- **GET:** `GET /health`
-- **Description:** Checks if the server is running and ready
+### 3. Stemming Configuration (`/api/index/config/stemming`)
+#### GET
+- **Description:** Gets stemming status
+#### PUT
+- **Description:** Enables/disables stemming
+```json
+{
+    "enabled": true
+}
+```
+
+### 4. Tokenizer Configuration (`/api/index/config/tokenizer`)
+#### GET
+- **Description:** Gets current tokenizer type
+#### PUT
+- **Description:** Sets tokenizer type
+```json
+{
+    "type": "standard"  // "whitespace", "simple"
+}
+```
+
+## Index Management Endpoints
+
+### 1. Health Check (`/api/index/health`)
+#### GET
+- **Description:** Checks system health
+- **Response:**
+```json
+{
+    "status": "UP",
+    "details": {
+        "indexSize": "1.2GB",
+        "documentCount": 1000
+    }
+}
+```
+
+### 2. Import Data (`/api/index/import`)
+#### POST `/api/index/import/cisi`
+- **Description:** Imports documents from CISI dataset
 - **Response:** `200 OK`
 ```json
 {
-    "status": "UP"
+    "imported": 1460,
+    "failed": 0,
+    "timeElapsed": "5.2s"
+}
+```
+
+#### POST `/api/index/import/pubmed`
+- **Description:** Imports documents from PubMed dataset
+- **Response:** `200 OK`
+```json
+{
+    "imported": 2500,
+    "failed": 0,
+    "timeElapsed": "8.7s"
+}
+```
+
+### 3. Index Metrics (`/api/index/metrics`)
+#### GET
+- **Description:** Retrieves performance metrics of the index
+- **Response:** `200 OK`
+```json
+{
+    "averageQueryTime": "45ms",
+    "indexSize": "1.2GB",
+    "memoryUsage": "856MB",
+    "cacheHitRate": "85%"
+}
+```
+
+### 4. Recreate Index (`/api/index/recreate`)
+#### POST
+- **Description:** Rebuilds the entire index from scratch
+- **Response:** `200 OK`
+```json
+{
+    "status": "success",
+    "timeElapsed": "2m 15s",
+    "documentsReindexed": 3960
+}
+```
+
+### 5. Index Statistics (`/api/index/stats`)
+#### GET
+- **Description:** Retrieves statistical information about the index
+- **Response:** `200 OK`
+```json
+{
+    "totalDocuments": 3960,
+    "collections": {
+        "general": 1500,
+        "academic": 2460
+    },
+    "uniqueTerms": 45678,
+    "averageDocumentLength": 850,
+    "lastUpdated": "2024-03-20T15:30:00Z"
 }
 ```
 
 ## Error Responses
-All endpoints may return the following error responses:
 
 ### 400 Bad Request
 ```json
 {
+    "status": 400,
     "message": "Invalid request parameters",
-    "status": 400
+    "details": "Specific error details"
 }
 ```
 
 ### 404 Not Found
 ```json
 {
-    "message": "Document not found with ID: xxx",
-    "status": 404
+    "status": 404,
+    "message": "Resource not found",
+    "details": "The requested resource could not be found"
 }
 ```
 
 ### 500 Internal Server Error
 ```json
 {
-    "message": "An unexpected error occurred",
     "status": 500,
-    "error": "Error details"
+    "message": "Internal server error",
+    "details": "An unexpected error occurred"
 }
 ```
 
 ## Usage Examples
 
-### Example 1: Complete Search Flow
-1. Configure the system:
+### Configuring and Searching
 ```bash
-# Set tokenizer
+# 1. Configure the system
 curl -X PUT http://localhost:8080/api/index/config/tokenizer \
      -H "Content-Type: application/json" \
      -d '{"type": "standard"}'
 
-# Enable stemming
-curl -X PUT http://localhost:8080/api/index/config/stemming \
-     -H "Content-Type: application/json" \
-     -d '{"enabled": true}'
-```
+# 2. Import CISI dataset
+curl -X POST http://localhost:8080/api/index/import/cisi
 
-2. Add a document:
-```bash
-curl -X POST http://localhost:8080/api/documents \
-     -H "Content-Type: application/json" \
-     -d '{
-         "title": "Information Retrieval",
-         "content": "Information retrieval is the science of searching for documents...",
-         "author": "Jane Smith",
-         "collection": "academic"
-     }'
-```
-
-3. Search documents:
-```bash
+# 3. Search documents
 curl -X POST http://localhost:8080/api/documents/search \
      -H "Content-Type: application/json" \
      -d '{
-         "query": "information search",
-         "collection": "academic",
-         "rankingAlgorithm": "tf-idf",
+         "query": "information retrieval systems",
+         "rankingAlgorithm": "bm25",
          "useStemming": true,
-         "resultsPerPage": 10,
-         "page": 0
+         "page": 0,
+         "resultsPerPage": 10
      }'
 ```
 
-### Example 2: Checking Current Configuration
+### Managing Documents
 ```bash
-# Get all configurations
-curl http://localhost:8080/api/index/config/tokenizer
-curl http://localhost:8080/api/index/config/stemming
-curl http://localhost:8080/api/index/config/ranking
-curl http://localhost:8080/api/index/config/normalization
+# Create a document
+curl -X POST http://localhost:8080/api/documents \
+     -H "Content-Type: application/json" \
+     -d '{
+         "title": "New Research Paper",
+         "content": "Content of the research paper...",
+         "collection": "academic"
+     }'
+
+# Get index statistics
+curl http://localhost:8080/api/index/stats
+
+# Check system health
+curl http://localhost:8080/api/index/health
 ```
 
-Note: All examples assume the server is running on localhost:8080. Adjust the URL accordingly for your deployment environment.
+Note: All examples assume the server is running on localhost:8080. Adjust the URL according to your deployment environment.
