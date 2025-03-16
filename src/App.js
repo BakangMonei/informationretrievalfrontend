@@ -36,6 +36,22 @@ axios.interceptors.response.use(
           <p className="text-sm">Make sure the Spring backend is running on port 8080</p>
         </div>
       );
+    } else if (error.response?.status === 500) {
+      const errorMessage = error.response?.data?.message || 'An internal server error occurred';
+      console.error('Server Error:', error.response?.data);
+      toast.error(
+        <div>
+          <strong>Server Error</strong>
+          <p className="text-sm">{errorMessage}</p>
+        </div>
+      );
+    } else if (error.response?.status === 404) {
+      toast.error(
+        <div>
+          <strong>Not Found</strong>
+          <p className="text-sm">The requested resource was not found</p>
+        </div>
+      );
     }
     return Promise.reject(error);
   }
@@ -190,6 +206,11 @@ function App() {
 
   const handleSearch = async (e) => {
     e.preventDefault();
+    if (!searchQuery.trim()) {
+      toast.error('Please enter a search query');
+      return;
+    }
+
     setLoading(prev => ({ ...prev, search: true }));
     try {
       const response = await axios.get('/documents/search', {
@@ -198,7 +219,12 @@ function App() {
       setDocuments(response.data);
       toast.success(`Found ${response.data.length} results`);
     } catch (error) {
-      toast.error('Error searching documents');
+      if (error.response?.status === 404) {
+        setDocuments([]);
+        toast.info('No documents found matching your search');
+      } else {
+        toast.error('Error searching documents');
+      }
     } finally {
       setLoading(prev => ({ ...prev, search: false }));
     }
@@ -231,18 +257,20 @@ function App() {
             id: 'uploadProgress',
           });
         },
+        timeout: 30000 // 30 seconds
       });
       
       toast.success('Documents uploaded successfully');
       await fetchIndexStats();
       setSelectedFile(null);
       
-      // Clear the file input
       const fileInput = document.querySelector('input[type="file"]');
       if (fileInput) fileInput.value = '';
       
     } catch (error) {
-      toast.error(error.response?.data?.message || 'Error uploading documents');
+      const errorMessage = error.response?.data?.message || 'Error uploading documents';
+      console.error('Upload Error:', error.response?.data);
+      toast.error(errorMessage);
     } finally {
       setLoading(prev => ({ ...prev, upload: false }));
       toast.dismiss('uploadProgress');
@@ -252,11 +280,15 @@ function App() {
   const handleImport = async (type) => {
     setLoading(prev => ({ ...prev, import: true }));
     try {
-      await axios.post(`/index/import/${type}`);
+      const response = await axios.post(`/index/import/${type}`, null, {
+        timeout: 60000 // 60 seconds timeout for potentially long import
+      });
       toast.success(`${type.toUpperCase()} dataset imported successfully`);
       await fetchInitialData();
     } catch (error) {
-      toast.error(`Error importing ${type} dataset`);
+      const errorMessage = error.response?.data?.message || `Error importing ${type} dataset`;
+      console.error('Import Error:', error.response?.data);
+      toast.error(errorMessage);
     } finally {
       setLoading(prev => ({ ...prev, import: false }));
     }
