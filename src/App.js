@@ -59,6 +59,33 @@ axios.interceptors.response.use(
   }
 );
 
+/**
+ * @fileoverview Main application component for the Information Retrieval System
+ * @module App
+ */
+
+/**
+ * @typedef {Object} SearchConfig
+ * @property {string} tokenizerType - The type of tokenizer to use ('standard' or 'custom')
+ * @property {boolean} useStemming - Whether to enable stemming
+ * @property {string} rankingAlgorithm - The ranking algorithm to use ('tf-idf' or 'tf')
+ * @property {boolean} lengthNormalization - Whether to enable length normalization
+ */
+
+/**
+ * @typedef {Object} LoadingState
+ * @property {boolean} search - Loading state for search operations
+ * @property {boolean} upload - Loading state for upload operations
+ * @property {boolean} import - Loading state for import operations
+ * @property {boolean} recreate - Loading state for index recreation
+ */
+
+/**
+ * Main Application Component
+ * Provides document search, upload, and index management functionality
+ * @component
+ * @returns {JSX.Element} The rendered application
+ */
 function App() {
   const [documents, setDocuments] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -107,6 +134,11 @@ function App() {
     autoplay: false
   };
 
+  /**
+   * Checks the API server availability
+   * @async
+   * @returns {Promise<void>}
+   */
   const checkApiAvailability = async () => {
     try {
       await axios.get('/index/stats');
@@ -223,6 +255,12 @@ function App() {
     }
   };
 
+  /**
+   * Handles document search
+   * @async
+   * @param {React.FormEvent} e - Form submission event
+   * @returns {Promise<void>}
+   */
   const handleSearch = async (e) => {
     e.preventDefault();
     if (!searchQuery.trim()) {
@@ -278,12 +316,22 @@ function App() {
     }
   };
 
+  /**
+   * Handles file upload selection
+   * @param {React.ChangeEvent<HTMLInputElement>} e - File input change event
+   * @returns {void}
+   */
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     setSelectedFile(file);
     toast.success(`Selected file: ${file.name}`);
   };
 
+  /**
+   * Handles bulk document upload
+   * @async
+   * @returns {Promise<void>}
+   */
   const handleBulkUpload = async () => {
     if (!selectedFile) {
       toast.error('Please select a file first');
@@ -325,6 +373,12 @@ function App() {
     }
   };
 
+  /**
+   * Imports a specific dataset type
+   * @async
+   * @param {('cisi'|'pubmed')} type - The type of dataset to import
+   * @returns {Promise<void>}
+   */
   const handleImport = async (type) => {
     setLoading(prev => ({ ...prev, import: true }));
     try {
@@ -363,7 +417,12 @@ function App() {
     setDialogOpen(true);
   };
 
-  // Add this component for server status
+  /**
+   * Server Status Component
+   * Displays current connection status with the server
+   * @component
+   * @returns {JSX.Element}
+   */
   const ServerStatus = () => (
     <div className={`fixed bottom-4 right-4 p-3 rounded-lg shadow-lg 
       ${serverStatus === 'connected' ? 'bg-green-100' :
@@ -380,7 +439,12 @@ function App() {
     </div>
   );
 
-  // Add this component before the return statement
+  /**
+   * Configuration Panel Component
+   * Displays and manages search configuration options
+   * @component
+   * @returns {JSX.Element}
+   */
   const ConfigurationPanel = () => (
     <div className="bg-white rounded-lg shadow-sm p-6 mb-8">
       <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
@@ -465,7 +529,14 @@ function App() {
     </div>
   );
 
-  // Add this new component for displaying search results
+  /**
+   * Search Results Component
+   * Displays search results in a formatted list
+   * @component
+   * @param {Object} props
+   * @param {Array<Object>} props.documents - Array of document results
+   * @returns {JSX.Element|null}
+   */
   const SearchResults = ({ documents }) => {
     if (!documents.length) {
       return null;
@@ -508,7 +579,14 @@ function App() {
     );
   };
 
-  // Add this component after the SearchResults component
+  /**
+   * Metrics Visualization Component
+   * Displays search and index performance metrics
+   * @component
+   * @param {Object} props
+   * @param {Object} props.metrics - Performance metrics data
+   * @returns {JSX.Element|null}
+   */
   const MetricsVisualization = ({ metrics }) => {
     if (!metrics) return null;
 
