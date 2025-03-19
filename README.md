@@ -76,7 +76,7 @@
     "page": 0
 }
 ```
-
+ 
 ### 4. Single Document Operations (`/api/documents/{id}`)
 #### GET
 - **Description:** Retrieves a specific document
