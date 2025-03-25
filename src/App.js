@@ -113,7 +113,11 @@ function App() {
     tokenizerType: 'standard', // or 'custom'
     useStemming: false,
     rankingAlgorithm: 'tf-idf', // or 'tf'
-    lengthNormalization: true
+    lengthNormalization: true,
+    // New evaluation-specific options
+    evaluationMode: false,
+    useRelevanceJudgments: false,
+    relevanceThreshold: 0.5
   });
 
   // Add new state for dialog
@@ -123,6 +127,21 @@ function App() {
     message: '',
     confirmText: '',
     onConfirm: () => { },
+  });
+
+  // Add new state variables for IR evaluation
+  const [evaluationMetrics, setEvaluationMetrics] = useState({
+    precisionRecall: [],
+    indexingStats: {
+      timeToIndex: null,
+      tokenCount: null,
+      uniqueTokenCount: null,
+      indexSize: null
+    },
+    tokenizationComparison: {
+      standard: {},
+      custom: {}
+    }
   });
 
   const sliderSettings = {
@@ -157,26 +176,44 @@ function App() {
     try {
       const response = await axios.get('/index/stats');
       setServerStatus('connected');
-      return true;
+      return { connected: true, indexExists: true };
     } catch (error) {
+      if (error.response) {
+        // Server is connected but returned an error related to missing index
+        if (error.response.status === 404 ||
+          (error.response.data && error.response.data.message &&
+            error.response.data.message.includes('IndexNotFound'))) {
+          setServerStatus('no-index');
+          return { connected: true, indexExists: false };
+        }
+      }
+
+      // Server is not connected
       setServerStatus('disconnected');
       console.error('Connection error:', error);
-      return false;
+      return { connected: false, indexExists: false };
     }
   };
 
-  useEffect(() => {
-    const initializeApp = async () => {
-      const isConnected = await checkServerConnection();
-      if (isConnected) {
-        await fetchInitialData();
-      }
-    };
-
-    initializeApp();
-  }, []);
-
   const fetchInitialData = async () => {
+    const connectionStatus = await checkServerConnection();
+
+    if (!connectionStatus.connected) {
+      toast.error('Cannot connect to server. Make sure the backend is running.');
+      return;
+    }
+
+    if (!connectionStatus.indexExists) {
+      toast.info(
+        <div className="flex flex-col gap-1">
+          <strong>No index found</strong>
+          <p>Please import a dataset or upload documents to create an index</p>
+        </div>,
+        { duration: 5000 }
+      );
+      return;
+    }
+
     toast.promise(
       Promise.all([
         fetchIndexStats(),
@@ -190,6 +227,14 @@ function App() {
       }
     );
   };
+
+  useEffect(() => {
+    const initializeApp = async () => {
+      await fetchInitialData();
+    };
+
+    initializeApp();
+  }, []);
 
   const fetchConfig = async () => {
     try {
@@ -507,14 +552,17 @@ function App() {
   const ServerStatus = () => (
     <div className={`fixed bottom-4 right-4 p-3 rounded-lg shadow-lg 
       ${serverStatus === 'connected' ? 'bg-green-100' :
-        serverStatus === 'checking' ? 'bg-yellow-100' : 'bg-red-100'}`}>
+        serverStatus === 'no-index' ? 'bg-yellow-100' :
+          serverStatus === 'checking' ? 'bg-yellow-100' : 'bg-red-100'}`}>
       <div className="flex items-center gap-2">
         <div className={`w-3 h-3 rounded-full 
           ${serverStatus === 'connected' ? 'bg-green-500' :
-            serverStatus === 'checking' ? 'bg-yellow-500' : 'bg-red-500'}`} />
+            serverStatus === 'no-index' ? 'bg-yellow-500' :
+              serverStatus === 'checking' ? 'bg-yellow-500' : 'bg-red-500'}`} />
         <span className="text-sm font-medium">
           {serverStatus === 'connected' ? 'Server Connected' :
-            serverStatus === 'checking' ? 'Checking Connection' : 'Server Disconnected'}
+            serverStatus === 'no-index' ? 'No Index Found' :
+              serverStatus === 'checking' ? 'Checking Connection' : 'Server Disconnected'}
         </span>
       </div>
     </div>
@@ -619,6 +667,41 @@ function App() {
           <p className="text-sm text-gray-500">
             Adjusts scores based on document length to avoid bias towards longer documents
           </p>
+        </div>
+      </div>
+
+      {/* Add new evaluation options */}
+      <div className="mt-6 border-t pt-6">
+        <h3 className="text-lg font-medium mb-4">Evaluation Options</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="space-y-2">
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={searchConfig.evaluationMode}
+                onChange={(e) => setSearchConfig(prev => ({
+                  ...prev,
+                  evaluationMode: e.target.checked
+                }))}
+                className="h-4 w-4 text-indigo-600"
+              />
+              <span>Enable Evaluation Mode</span>
+            </label>
+          </div>
+          <div className="space-y-2">
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={searchConfig.useRelevanceJudgments}
+                onChange={(e) => setSearchConfig(prev => ({
+                  ...prev,
+                  useRelevanceJudgments: e.target.checked
+                }))}
+                className="h-4 w-4 text-indigo-600"
+              />
+              <span>Use Relevance Judgments</span>
+            </label>
+          </div>
         </div>
       </div>
     </div>
@@ -828,6 +911,198 @@ function App() {
     </svg>
   );
 
+  // Add new component for IR Evaluation Results
+  const IREvaluationResults = ({ metrics }) => {
+    if (!metrics?.precisionRecall?.length) return null;
+
+    return (
+      <div className="bg-white rounded-lg shadow-sm p-6 mb-8">
+        <h2 className="text-xl font-semibold mb-4">IR System Evaluation</h2>
+
+        {/* Precision-Recall Graph */}
+        <div className="mb-6">
+          <h3 className="font-medium mb-2">Precision-Recall Curve</h3>
+          {/* Add visualization library implementation here */}
+        </div>
+
+        {/* Indexing Statistics */}
+        <div className="grid grid-cols-2 gap-4 mb-6">
+          <div className="bg-gray-50 p-4 rounded-lg">
+            <h3 className="text-sm font-medium">Time to Index</h3>
+            <p className="text-2xl font-bold text-indigo-600">
+              {metrics.indexingStats.timeToIndex}
+            </p>
+          </div>
+          <div className="bg-gray-50 p-4 rounded-lg">
+            <h3 className="text-sm font-medium">Token Count</h3>
+            <p className="text-2xl font-bold text-indigo-600">
+              {metrics.indexingStats.tokenCount}
+            </p>
+          </div>
+        </div>
+
+        {/* Tokenizer Comparison */}
+        <div className="mb-6">
+          <h3 className="font-medium mb-2">Tokenizer Comparison</h3>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-gray-50 p-4 rounded-lg">
+              <h4 className="text-sm font-medium">Standard Tokenizer</h4>
+              <pre className="text-sm mt-2">
+                {JSON.stringify(metrics.tokenizationComparison.standard, null, 2)}
+              </pre>
+            </div>
+            <div className="bg-gray-50 p-4 rounded-lg">
+              <h4 className="text-sm font-medium">Custom Tokenizer</h4>
+              <pre className="text-sm mt-2">
+                {JSON.stringify(metrics.tokenizationComparison.custom, null, 2)}
+              </pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Add a new component for initial setup guidance
+  const SetupGuide = () => {
+    if (serverStatus !== 'no-index') return null;
+
+    return (
+      <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-6 mb-8">
+        <h2 className="text-xl font-semibold mb-4 text-indigo-800">IR System Setup Guide</h2>
+        <p className="mb-4">To get started with the IR system evaluation, follow these steps:</p>
+
+        <ol className="list-decimal pl-6 space-y-3 mb-6">
+          <li>
+            <strong>Import a dataset</strong> - Use one of the provided datasets (CISI or PubMed)
+          </li>
+          <li>
+            <strong>Configure tokenization</strong> - Choose between Standard and Custom tokenization
+          </li>
+          <li>
+            <strong>Configure ranking</strong> - Select TF or TF-IDF weighting
+          </li>
+          <li>
+            <strong>Run queries</strong> - Search the imported collection with different parameters
+          </li>
+          <li>
+            <strong>Analyze results</strong> - Compare precision, recall, and other metrics
+          </li>
+        </ol>
+
+        <div className="bg-white p-4 rounded-md">
+          <h3 className="font-medium mb-2">Quick Import</h3>
+          <div className="flex gap-4">
+            <button
+              onClick={() => handleImport('cisi')}
+              disabled={loading.import}
+              className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 flex items-center gap-2 disabled:opacity-50"
+            >
+              {loading.import ? <Loader className="animate-spin" /> : <Database className="h-4 w-4" />}
+              Import CISI Dataset
+            </button>
+            <button
+              onClick={() => handleImport('pubmed')}
+              disabled={loading.import}
+              className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 flex items-center gap-2 disabled:opacity-50"
+            >
+              {loading.import ? <Loader className="animate-spin" /> : <Database className="h-4 w-4" />}
+              Import PubMed Dataset
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Add a new component for comparison visualization
+  const ComparisonVisualization = ({ metrics }) => {
+    if (!metrics) return null;
+
+    return (
+      <div className="bg-white rounded-lg shadow-sm p-6 mb-8">
+        <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
+          <BarChart className="h-5 w-5 text-indigo-600" />
+          IR System Comparison
+        </h2>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+          <div>
+            <h3 className="font-medium mb-3">Tokenizer Comparison</h3>
+            <div className="bg-gray-50 p-4 rounded-md">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <h4 className="text-sm font-medium text-gray-500">Standard</h4>
+                  <ul className="mt-2 space-y-1 text-sm">
+                    <li>Token Count: {metrics.tokenCount || 'N/A'}</li>
+                    <li>Unique Tokens: {metrics.uniqueTokenCount || 'N/A'}</li>
+                    <li>Tokenization Time: {metrics.tokenizationTime}ms</li>
+                  </ul>
+                </div>
+                <div>
+                  <h4 className="text-sm font-medium text-gray-500">Custom</h4>
+                  <ul className="mt-2 space-y-1 text-sm">
+                    <li>Token Count: N/A</li>
+                    <li>Unique Tokens: N/A</li>
+                    <li>Tokenization Time: N/A</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <h3 className="font-medium mb-3">Stemming Impact</h3>
+            <div className="bg-gray-50 p-4 rounded-md">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <h4 className="text-sm font-medium text-gray-500">With Stemming</h4>
+                  <ul className="mt-2 space-y-1 text-sm">
+                    <li>Index Size: N/A</li>
+                    <li>Token Count: N/A</li>
+                    <li>Average Score: N/A</li>
+                  </ul>
+                </div>
+                <div>
+                  <h4 className="text-sm font-medium text-gray-500">Without Stemming</h4>
+                  <ul className="mt-2 space-y-1 text-sm">
+                    <li>Index Size: N/A</li>
+                    <li>Token Count: N/A</li>
+                    <li>Average Score: N/A</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <h3 className="font-medium mb-3">Ranking Algorithm Comparison</h3>
+          <div className="bg-gray-50 p-4 rounded-md">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <h4 className="text-sm font-medium text-gray-500">TF-IDF</h4>
+                <ul className="mt-2 space-y-1 text-sm">
+                  <li>Precision: {metrics.precision || 'N/A'}</li>
+                  <li>Recall: {metrics.recall || 'N/A'}</li>
+                  <li>F1 Score: {metrics.f1Score || 'N/A'}</li>
+                </ul>
+              </div>
+              <div>
+                <h4 className="text-sm font-medium text-gray-500">Term Frequency</h4>
+                <ul className="mt-2 space-y-1 text-sm">
+                  <li>Precision: N/A</li>
+                  <li>Recall: N/A</li>
+                  <li>F1 Score: N/A</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       <Toaster position="top-right" />
@@ -842,6 +1117,9 @@ function App() {
           </h1>
           <p className="text-gray-600">Search and manage your document collection</p>
         </div>
+
+        {/* Setup Guide (displayed only when no index exists) */}
+        <SetupGuide />
 
         {/* Search Section */}
         <div className="bg-white rounded-lg shadow-sm p-6 mb-8">
@@ -876,6 +1154,9 @@ function App() {
             </button>
           </form>
         </div>
+
+        {/* Configuration Panel */}
+        <ConfigurationPanel />
 
         {/* Document Upload Section */}
         <div className="bg-white rounded-lg shadow-sm p-6 mb-8">
@@ -952,48 +1233,8 @@ function App() {
           </div>
         </div>
 
-        {/* Stats & Metrics Slider */}
-        <div className="bg-white rounded-lg shadow-sm p-6 mb-8">
-          <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
-            <BarChart className="h-5 w-5 text-indigo-600" />
-            Statistics & Metrics
-          </h2>
-          <Slider {...sliderSettings}>
-            <div className="p-4">
-              <h3 className="font-semibold mb-2">Index Statistics</h3>
-              {indexStats ? (
-                <pre className="bg-gray-50 p-4 rounded-md overflow-auto">
-                  {JSON.stringify(indexStats, null, 2)}
-                </pre>
-              ) : (
-                <div className="text-gray-500 italic">No statistics available</div>
-              )}
-            </div>
-            <div className="p-4">
-              <h3 className="font-semibold mb-2">Index Metrics</h3>
-              {indexMetrics ? (
-                <pre className="bg-gray-50 p-4 rounded-md overflow-auto">
-                  {JSON.stringify(indexMetrics, null, 2)}
-                </pre>
-              ) : (
-                <div className="text-gray-500 italic">No metrics available</div>
-              )}
-            </div>
-            <div className="p-4">
-              <h3 className="font-semibold mb-2">Configuration</h3>
-              {Object.values(config).some(value => value !== null) ? (
-                <pre className="bg-gray-50 p-4 rounded-md overflow-auto">
-                  {JSON.stringify(config, null, 2)}
-                </pre>
-              ) : (
-                <div className="text-gray-500 italic">No configuration available</div>
-              )}
-            </div>
-          </Slider>
-        </div>
-
-        {/* Configuration Panel */}
-        <ConfigurationPanel />
+        {/* Comparison Visualization (for IR evaluation) */}
+        <ComparisonVisualization metrics={indexMetrics} />
 
         {/* Search Results */}
         <SearchResults documents={documents} />
