@@ -28,32 +28,53 @@ axios.defaults.headers.common['Accept'] = 'application/json';
 axios.defaults.timeout = 5000; // 5 seconds timeout
 
 // Add axios interceptors for better error handling
+// axios.interceptors.response.use(
+//   response => response,
+//   error => {
+//     if (error.code === 'ERR_NETWORK') {
+//       toast.error(
+//         <div>
+//           <strong>Cannot connect to server</strong>
+//           <p className="text-sm">Make sure the Spring backend is running on port 8080</p>
+//         </div>
+//       );
+//     } else if (error.response?.status === 500) {
+//       const errorMessage = error.response?.data?.message || 'An internal server error occurred';
+//       console.error('Server Error:', error.response?.data);
+//       toast.error(
+//         <div>
+//           <strong>Server Error</strong>
+//           <p className="text-sm">{errorMessage}</p>
+//         </div>
+//       );
+//     } else if (error.response?.status === 404) {
+//       toast.error(
+//         <div>
+//           <strong>Not Found</strong>
+//           <p className="text-sm">The requested resource was not found</p>
+//         </div>
+//       );
+//     }
+//     return Promise.reject(error);
+//   }
+// );
+// Add axios interceptors for better error handling
 axios.interceptors.response.use(
   response => response,
   error => {
     if (error.code === 'ERR_NETWORK') {
-      toast.error(
-        <div>
-          <strong>Cannot connect to server</strong>
-          <p className="text-sm">Make sure the Spring backend is running on port 8080</p>
-        </div>
-      );
+      toast.error('Cannot connect to server. Make sure the backend is running.');
     } else if (error.response?.status === 500) {
       const errorMessage = error.response?.data?.message || 'An internal server error occurred';
       console.error('Server Error:', error.response?.data);
-      toast.error(
-        <div>
-          <strong>Server Error</strong>
-          <p className="text-sm">{errorMessage}</p>
-        </div>
-      );
+      toast.error(`Server Error: ${errorMessage}`);
     } else if (error.response?.status === 404) {
-      toast.error(
-        <div>
-          <strong>Not Found</strong>
-          <p className="text-sm">The requested resource was not found</p>
-        </div>
-      );
+      toast.error('The requested resource was not found');
+    } else if (error.response?.status === 400) {
+      const details = error.response.data.details || error.response.data.message;
+      toast.error(`Validation Error: ${details}`);
+    } else {
+      toast.error('An unexpected error occurred');
     }
     return Promise.reject(error);
   }
@@ -92,6 +113,7 @@ function App() {
   const [indexStats, setIndexStats] = useState(null);
   const [indexMetrics, setIndexMetrics] = useState(null);
   const [selectedFile, setSelectedFile] = useState(null);
+  const [fetchDocuments, setFetchDocuments] = useState(null)
   const [loading, setLoading] = useState({
     search: false,
     upload: false,
@@ -99,6 +121,10 @@ function App() {
     recreate: false
   });
   const [serverStatus, setServerStatus] = useState('checking');
+  // Add new state variables after existing useState declarations
+  const [selectedDoc, setSelectedDoc] = useState(null);
+  const [currentPage, setCurrentPage] = useState(0);
+  const [indexHealth, setIndexHealth] = useState({ status: 'UP', details: '' });
 
   // Index Configuration States
   const [config, setConfig] = useState({
@@ -193,6 +219,92 @@ function App() {
       console.error('Connection error:', error);
       return { connected: false, indexExists: false };
     }
+  };
+  const checkServerHealth = async () => {
+    try {
+      const response = await axios.get('/index/health');
+      const status = response.data.status;
+      setServerStatus(status === 'UP' ? 'connected' : 'unhealthy');
+      setIndexHealth(response.data);
+    } catch (error) {
+      setServerStatus('disconnected');
+      setIndexHealth({ status: 'DOWN', details: error.message });
+    }
+  };
+
+  // Update useEffect to use new health check
+  useEffect(() => {
+    const initializeApp = async () => {
+      await checkServerHealth();
+      if (serverStatus === 'connected') {
+        await fetchInitialData();
+      }
+    };
+
+    initializeApp();
+  }, []);
+
+  const DocumentDetailModal = () => {
+    if (!selectedDoc) return null;
+
+    const handleDelete = async () => {
+      try {
+        await axios.delete(`/documents/${selectedDoc.id}`);
+        toast.success('Document deleted successfully');
+        setSelectedDoc(null);
+        // Refresh documents list
+        fetchDocuments(currentPage);
+      } catch (error) {
+        toast.error('Failed to delete document');
+      }
+    };
+
+    const handleUpdate = async (e) => {
+      e.preventDefault();
+      try {
+        await axios.put(`/documents/${selectedDoc.id}`, selectedDoc);
+        toast.success('Document updated successfully');
+        setSelectedDoc(null);
+        // Refresh documents list
+        fetchDocuments(currentPage);
+      } catch (error) {
+        toast.error('Failed to update document');
+      }
+    };
+
+    return (
+      <Dialog open={!!selectedDoc} onClose={() => setSelectedDoc(null)}>
+        <div className="fixed inset-0 bg-black/30" aria-hidden="true" />
+        <div className="fixed inset-0 flex items-center justify-center p-4">
+          <Dialog.Panel className="mx-auto max-w-sm rounded bg-white p-6">
+            <Dialog.Title className="text-lg font-medium">{selectedDoc.title}</Dialog.Title>
+            <form onSubmit={handleUpdate} className="mt-4">
+              <input
+                type="text"
+                value={selectedDoc.title}
+                onChange={e => setSelectedDoc(prev => ({ ...prev, title: e.target.value }))}
+                className="w-full rounded border p-2"
+              />
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={handleDelete}
+                  className="px-4 py-2 bg-red-600 text-white rounded"
+                >
+                  Delete
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-indigo-600 text-white rounded"
+                >
+                  Save
+                </button>
+              </div>
+            </form>
+          </Dialog.Panel>
+        </div>
+      </Dialog>
+    );
   };
 
   const fetchInitialData = async () => {
@@ -432,53 +544,37 @@ function App() {
     }
 
     setLoading(prev => ({ ...prev, upload: true }));
-    const formData = new FormData();
-    formData.append('file', selectedFile.file);
+    const reader = new FileReader();
 
-    // Add configuration parameters
-    formData.append('tokenizerType', searchConfig.tokenizerType);
-    formData.append('useStemming', searchConfig.useStemming);
-    formData.append('rankingAlgorithm', searchConfig.rankingAlgorithm);
-    formData.append('lengthNormalization', searchConfig.lengthNormalization);
+    reader.onload = async (e) => {
+      try {
+        const docs = JSON.parse(e.target.result);
+        const response = await axios.post('/documents/bulk', docs);
 
-    try {
-      const uploadResponse = await axios.post('/documents/bulk', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-        timeout: 300000 // 5 minutes
-      });
-
-      if (uploadResponse.data) {
-        const metrics = uploadResponse.data;
-
-        // Update metrics display
-        setIndexMetrics(prev => ({
-          ...prev,
-          documentCount: metrics.totalDocuments,
-          tokenCount: metrics.totalTokens,
-          uniqueTokenCount: metrics.uniqueTokens,
-          processingTime: metrics.processingTime,
-          averageDocumentLength: metrics.averageDocLength,
-          precision: metrics.precision,
-          recall: metrics.recall,
-          f1Score: metrics.f1Score,
-          datasetType: metrics.datasetType
-        }));
-
-        toast.success(`Processed ${metrics.totalDocuments} documents with ${metrics.uniqueTokens} unique tokens`);
-        await fetchIndexStats();
+        if (response.data) {
+          const metrics = response.data;
+          setIndexMetrics(prev => ({
+            ...prev,
+            documentCount: metrics.totalDocuments,
+            tokenCount: metrics.totalTokens,
+            uniqueTokenCount: metrics.uniqueTokens,
+            processingTime: metrics.processingTime
+          }));
+          toast.success(`${docs.length} documents uploaded successfully`);
+          await fetchIndexStats();
+        }
+      } catch (error) {
+        console.error('Upload Error:', error);
+        toast.error('Invalid document format or upload failed');
+      } finally {
+        setLoading(prev => ({ ...prev, upload: false }));
+        setSelectedFile(null);
+        const fileInput = document.querySelector('input[type="file"]');
+        if (fileInput) fileInput.value = '';
       }
+    };
 
-    } catch (error) {
-      console.error('Upload Error Details:', error);
-      toast.error(error.response?.data?.message || 'Error processing documents');
-    } finally {
-      setLoading(prev => ({ ...prev, upload: false }));
-      setSelectedFile(null);
-      const fileInput = document.querySelector('input[type="file"]');
-      if (fileInput) fileInput.value = '';
-    }
+    reader.readAsText(selectedFile.file);
   };
 
   // Add this helper function to check file format
@@ -588,19 +684,18 @@ function App() {
           </label>
           <select
             value={searchConfig.tokenizerType}
-            onChange={(e) => setSearchConfig(prev => ({
-              ...prev,
-              tokenizerType: e.target.value
-            }))}
+            onChange={(e) => {
+              const type = e.target.value;
+              setSearchConfig(prev => ({ ...prev, tokenizerType: type }));
+              axios.put('/index/config/tokenizer', { type })
+                .then(() => toast.success('Tokenizer configuration updated'))
+                .catch(() => toast.error('Failed to update tokenizer'));
+            }}
             className="w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
           >
             <option value="standard">Standard Tokenizer</option>
             <option value="custom">Custom Tokenizer</option>
           </select>
-          <p className="text-sm text-gray-500">
-            Standard: Splits on whitespace
-            Custom: Advanced tokenization with punctuation handling
-          </p>
         </div>
 
         {/* Stemming Toggle */}
@@ -612,17 +707,17 @@ function App() {
             <input
               type="checkbox"
               checked={searchConfig.useStemming}
-              onChange={(e) => setSearchConfig(prev => ({
-                ...prev,
-                useStemming: e.target.checked
-              }))}
+              onChange={(e) => {
+                const enabled = e.target.checked;
+                setSearchConfig(prev => ({ ...prev, useStemming: enabled }));
+                axios.put('/index/config/stemming', { enabled })
+                  .then(() => toast.success('Stemming configuration updated'))
+                  .catch(() => toast.error('Failed to update stemming'));
+              }}
               className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
             />
             <span className="ml-2 text-sm text-gray-600">Enable Stemming</span>
           </div>
-          <p className="text-sm text-gray-500">
-            Reduces words to their root form (e.g., "running" → "run")
-          </p>
         </div>
 
         {/* Ranking Algorithm */}
@@ -632,76 +727,18 @@ function App() {
           </label>
           <select
             value={searchConfig.rankingAlgorithm}
-            onChange={(e) => setSearchConfig(prev => ({
-              ...prev,
-              rankingAlgorithm: e.target.value
-            }))}
+            onChange={(e) => {
+              const algorithm = e.target.value;
+              setSearchConfig(prev => ({ ...prev, rankingAlgorithm: algorithm }));
+              axios.put('/index/config/ranking', { algorithm })
+                .then(() => toast.success('Ranking algorithm updated'))
+                .catch(() => toast.error('Failed to update ranking algorithm'));
+            }}
             className="w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
           >
             <option value="tf-idf">TF-IDF</option>
             <option value="tf">Term Frequency</option>
           </select>
-          <p className="text-sm text-gray-500">
-            TF-IDF: Considers term frequency and document frequency
-            TF: Only considers term frequency
-          </p>
-        </div>
-
-        {/* Length Normalization */}
-        <div className="space-y-2">
-          <label className="block text-sm font-medium text-gray-700">
-            Length Normalization
-          </label>
-          <div className="flex items-center">
-            <input
-              type="checkbox"
-              checked={searchConfig.lengthNormalization}
-              onChange={(e) => setSearchConfig(prev => ({
-                ...prev,
-                lengthNormalization: e.target.checked
-              }))}
-              className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
-            />
-            <span className="ml-2 text-sm text-gray-600">Enable Length Normalization</span>
-          </div>
-          <p className="text-sm text-gray-500">
-            Adjusts scores based on document length to avoid bias towards longer documents
-          </p>
-        </div>
-      </div>
-
-      {/* Add new evaluation options */}
-      <div className="mt-6 border-t pt-6">
-        <h3 className="text-lg font-medium mb-4">Evaluation Options</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="space-y-2">
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={searchConfig.evaluationMode}
-                onChange={(e) => setSearchConfig(prev => ({
-                  ...prev,
-                  evaluationMode: e.target.checked
-                }))}
-                className="h-4 w-4 text-indigo-600"
-              />
-              <span>Enable Evaluation Mode</span>
-            </label>
-          </div>
-          <div className="space-y-2">
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={searchConfig.useRelevanceJudgments}
-                onChange={(e) => setSearchConfig(prev => ({
-                  ...prev,
-                  useRelevanceJudgments: e.target.checked
-                }))}
-                className="h-4 w-4 text-indigo-600"
-              />
-              <span>Use Relevance Judgments</span>
-            </label>
-          </div>
         </div>
       </div>
     </div>
@@ -1107,6 +1144,7 @@ function App() {
     <div className="min-h-screen bg-gray-50">
       <Toaster position="top-right" />
       <ServerStatus />
+      <DocumentDetailModal />
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}
@@ -1154,6 +1192,57 @@ function App() {
             </button>
           </form>
         </div>
+
+        {/* Add health warning if unhealthy */}
+        {serverStatus === 'unhealthy' && (
+          <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-8">
+            <div className="flex">
+              <div className="flex-shrink-0">
+                <AlertCircle className="h-5 w-5 text-yellow-400" />
+              </div>
+              <div className="ml-3">
+                <p className="text-sm text-yellow-700">
+                  Index Health Warning: {indexHealth.details}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+
+        {/* Add Document List section */}
+        <section className="bg-white rounded-lg shadow-sm p-6 mb-8">
+          <h2 className="text-xl font-semibold mb-4">All Documents</h2>
+          <div className="space-y-4">
+            {documents.map(doc => (
+              <div key={doc.id} className="border-b pb-4">
+                <h3 className="font-medium">{doc.title}</h3>
+                <button
+                  onClick={() => setSelectedDoc(doc)}
+                  className="text-sm text-indigo-600 hover:text-indigo-800"
+                >
+                  View Details
+                </button>
+              </div>
+            ))}
+          </div>
+          <div className="mt-4 flex justify-between">
+            <button
+              onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
+              disabled={currentPage === 0}
+              className="px-4 py-2 bg-gray-100 rounded disabled:opacity-50"
+            >
+              Previous
+            </button>
+            <button
+              onClick={() => setCurrentPage(p => p + 1)}
+              disabled={documents.length < 10}
+              className="px-4 py-2 bg-gray-100 rounded disabled:opacity-50"
+            >
+              Next
+            </button>
+          </div>
+        </section>
 
         {/* Configuration Panel */}
         <ConfigurationPanel />
